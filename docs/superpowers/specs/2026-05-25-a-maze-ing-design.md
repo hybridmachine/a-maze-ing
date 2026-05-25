@@ -52,6 +52,23 @@ These rules are enforced during maze authoring; the validator (§5) checks the t
 
 Reset preserves outfits and items at profile scope (see §2.7) — resetting the ice maze never removes the winter coat the player earned in the village maze.
 
+**Exact reset semantics.** When a player resets a maze, the engine performs the following operations under one save transaction, in order:
+
+| State | Action on reset |
+|---|---|
+| `maze_inventory` for this maze | Cleared |
+| `entity_overrides` for this maze | Cleared |
+| `maze_snapshot` for this maze | Deleted (player respawns at the maze's `start` position) |
+| Clock | Reset to the maze's `time_start` value |
+| NPC dialog state and `repeat` counters | Reset to initial |
+| Time-gated entity state | Recomputed from clock and current time gates |
+| Player's currently-worn outfit | Preserved (profile-level) |
+| `profile_items` and `outfit_worn` | Preserved |
+| `maze_progress.state` for this maze | Reset to `in_progress` (or to `locked` if this maze required a profile item the player no longer has — guarded by save migration tests) |
+| `maze_progress` for other mazes | Untouched |
+
+The reset path is its own typed function `save_reset_maze(profile_id, maze_id)`; gameplay calls it once and never assembles the operations ad-hoc.
+
 ### 2.4 Movement and collision shapes
 
 Free 8-direction movement at pixel granularity. The character walks with an animated cycle (arm swing, leg motion) and has a separate face layer for expressions (happy, surprised, cold, curious). Movement speed is constant; no sprinting.
@@ -174,6 +191,14 @@ The following are MVP requirements, not stretch goals:
 
 Controller support remains out of scope for MVP but the input architecture should not preclude it (action mapping is already decoupled from raw key codes).
 
+**Binding rules and recovery:**
+
+- **Each key binds to at most one action.** Assigning a key already in use prompts a single "swap or cancel" confirmation; on swap, the previously bound action becomes unbound.
+- **Reserved keys.** `Escape` is always bound to "back / pause" and cannot be remapped. `Enter` defaults to "confirm" in menus and is unbindable from menus. (Both can be supplemented with secondary bindings that are user-set.)
+- **Required actions.** A binding set must include bindings for: move (4 directions), action, inventory, pause. Any missing required binding is flagged before the player can leave the Settings menu.
+- **Reset to defaults.** Settings always offers a one-click "Reset bindings to defaults" option.
+- **Recovery from a broken binding set.** If the persisted binding set is missing required actions on load (e.g., from a botched migration or a corrupted file), the input layer logs the issue and silently falls back to the defaults; the Settings menu opens with a non-blocking notice explaining the reset.
+
 ## 3. Technical architecture
 
 ### 3.1 Module layout
@@ -212,20 +237,22 @@ Flat C modules, one `.c/.h` pair per subsystem. All state is passed explicitly v
 - **No globals.** A single `Game *g` is threaded through. Each subsystem takes only the parts it needs.
 - **File-size guardrail.** Aim for under ~500 lines per `.c`. Split by category if a module grows past that (e.g., `entity_item.c`, `entity_npc.c`, `entity_hazard.c`).
 
-### 3.3 Update pipeline (per-frame, deterministic)
+### 3.3 Update pipeline (fixed-step, deterministic)
 
-The game tick runs in a fixed order each frame to prevent bugs around time gates, hazard stepping, and mid-frame entity mutation:
+**Simulation runs at a fixed 60 Hz tick** (16.6 ms). Rendering runs at the display's refresh rate. The main loop uses a fixed-step accumulator: each frame, it adds elapsed wall time to an accumulator and runs as many 60 Hz ticks as fit (clamped to at most 5 ticks per frame to avoid spirals after long pauses). Fixed-step makes player movement, hazards, time gates, and entity callbacks reproducible — invaluable for tests and replay-style debugging.
+
+Tick order (one tick):
 
 1. **Poll input** — gather actions, never raw key codes, from `input`.
 2. **Update UI or gameplay state** — pause/resume/menu transitions resolve before world simulation.
 3. **Resolve player movement** — apply velocity, slide against blocking shapes, snap-out of overlaps.
 4. **Apply hazards/triggers** — hazard regions act on the player's new position; triggers fire `on_player_enter`/`on_player_exit`.
-5. **Run entity step callbacks** — NPCs patrol, animated decor advances frames, time-gated visibility recomputes.
+5. **Run entity step callbacks** — NPCs patrol, animated decor advances frames, time-gated visibility recomputes. Callbacks receive the fixed tick `dt` of 1/60 s.
 6. **Advance clock if unpaused.**
 7. **Queue save events** — gameplay code calls `save_checkpoint(reason)` at coherent moments; no scattered individual writes.
 8. **Update audio targets** — recompute mixer targets from zone and time-of-day state.
 
-Rendering happens after the tick, on the same frame.
+Rendering happens after the tick (or batch of ticks) on each frame, with optional sprite-position interpolation between the previous and current tick states if subtick smoothness is needed for high-refresh displays.
 
 ### 3.4 Memory ownership conventions
 
@@ -289,6 +316,8 @@ Each maze is a single file at `data/mazes/<theme>.maze`. Header is `key: value` 
 
 **Entity lines carry an explicit `behavior#stable_id` prefix.** The stable id is a designer-assigned text string that persists across saves and survives reordering or insertion of other entities. The engine-internal numeric id is *not* used in saves.
 
+**Stable ID convention.** The save schema requires uniqueness only within a maze (`(profile_id, maze_id, stable_id)` is the PK). By **convention**, however, stable IDs are required to begin with the maze's id as a prefix — e.g., `nature.seed.west_glade`, `circuit.gate.capacitor_b`. This gives global uniqueness for free, makes debugging traces and SQL queries readable, and means stable IDs work as universal references in tooling. The validator enforces both within-maze uniqueness (mandatory) and the maze-prefix convention (warning by default, error in CI).
+
 ```
 name:       maze.nature.name
 theme:      nature
@@ -327,19 +356,27 @@ market       28-36 20-26  texture:village_chatter.ogg
 
 ### 3.7 Rendering pipeline
 
-Each frame renders to a fixed-size logical render texture (e.g., 480×270), then upscales with nearest-neighbor to the window. Preserves pixel crispness at any window size. raylib's `BeginTextureMode` / `DrawTexturePro` handles this directly.
+Rendering splits into two resolutions to keep the pixel-art world crisp while keeping UI text readable on modern displays:
+
+- **World layer** renders to a fixed-size logical render texture (e.g., 480×270), then upscales with **nearest-neighbor** to the window. This is where the pixel-art look lives.
+- **UI layer** (HUD, dialogs, menus, settings, inventory, interaction prompts) renders at the **native window resolution** with smooth text. UI scale is set by a Settings option (`auto` / `1x` / `1.5x` / `2x` / `3x`); `auto` picks a sensible multiplier based on window height (e.g., 1x at 720p, 1.5x at 1080p, 3x at 4K).
+
+raylib's `BeginTextureMode` / `DrawTexturePro` handles the world upscale; UI is drawn in standard screen space after the upscale.
 
 Per-frame draw order:
 
-1. Sky / gradient — tinted by time of day.
-2. Far parallax — distant hills/walls.
-3. Near parallax — closer wall layer.
-4. Ground tiles — iso, no z-sort (always below entities).
-5. Shadows pass — all shadows drawn under all sprites (so a shadow never occludes another sprite).
-6. Entities — y-sorted by foot point.
-7. Player — interleaved into the entity y-sort.
-8. Light/dusk overlay — multiplicative tint over the playfield.
-9. HUD and clock — screen space, no camera transform.
+1. Sky / gradient (world layer) — tinted by time of day.
+2. Far parallax (world layer) — distant hills/walls.
+3. Near parallax (world layer) — closer wall layer.
+4. Ground tiles (world layer) — iso, no z-sort (always below entities).
+5. Shadows pass (world layer) — all shadows drawn under all sprites (so a shadow never occludes another sprite).
+6. Entities (world layer) — y-sorted by foot point.
+7. Player (world layer) — interleaved into the entity y-sort.
+8. Light/dusk overlay (world layer) — multiplicative tint over the playfield.
+9. **Upscale world texture to window.**
+10. HUD and clock (UI layer) — native resolution.
+11. Dialogs / menus / inventory (UI layer) — native resolution, drawn over HUD.
+12. Interaction prompts (UI layer) — positioned in screen space using the target entity's UI-projected anchor.
 
 **Iso projection.** `sx = (tx - ty) * TW/2; sy = (tx + ty) * TH/2`. Tile dimensions are nominally 64×32 (2:1 dimetric).
 
@@ -399,7 +436,9 @@ CREATE TABLE settings (
   PRIMARY KEY (profile_id, key)
 );
 
--- Profile-scope: outfits, permanent tools, maze-access items.
+-- Profile-scope ownership table. Single source of truth for outfits,
+-- permanent tools, maze-access items.  Item kind is looked up from the
+-- item definition manifest (see §4.2), not stored here, to avoid drift.
 CREATE TABLE profile_items (
   profile_id  INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
   item_id     TEXT NOT NULL,     -- "winter_coat", "watering_can"
@@ -407,10 +446,12 @@ CREATE TABLE profile_items (
   PRIMARY KEY (profile_id, item_id)
 );
 
-CREATE TABLE outfits_owned (
-  profile_id  INTEGER REFERENCES profiles(id) ON DELETE CASCADE,
-  outfit_id   TEXT NOT NULL,
-  PRIMARY KEY (profile_id, outfit_id)
+-- Currently-worn outfit per profile. References an item_id whose
+-- definition has kind:outfit. This is the only mutable outfit state;
+-- ownership lives in profile_items.
+CREATE TABLE outfit_worn (
+  profile_id  INTEGER PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  outfit_id   TEXT NOT NULL
 );
 
 -- Maze-scope: keys, tickets, seeds, single-maze consumables.
@@ -481,27 +522,99 @@ On first launch, the loader inspects `getenv("LANG")` / `setlocale` / Windows `G
 
 Bundled font (Inter or Noto Sans, OFL-licensed) is baked at boot via `LoadFontEx` with a Latin Extended codepoint set. Codepoints outside the bundled font's coverage render as the font's "missing glyph" box — the game never crashes on a partially-translated `.lang` file or unexpected codepoint.
 
-## 4. Asset pipeline and manifest
+## 4. Asset pipeline and data manifests
+
+### 4.1 Sources and outputs
 
 - Source art lives in `art_src/` (Blender files, render scripts). Not shipped with the game.
 - Final assets are PNG sprite sheets in `assets/themes/<theme>/`, `assets/character/outfits/`, `assets/character/faces/`, `assets/ui/`.
 - Audio: OGG Vorbis throughout, mono for one-shots, stereo for ambient layers. Mastered to consistent loudness so the mixer can blend without per-clip gain compensation.
 - No build-time baking. Game loads assets at runtime through `asset.c`.
 
-**Asset manifest.** Each theme directory carries a `manifest.txt` declaring per-sprite metadata the engine needs. Without it, gameplay data would have to be derived from image dimensions:
+### 4.2 Item definitions
+
+Item behavior and metadata live in `data/items.txt`, not inside maze entity lines. The inventory UI, save schema, and validator all consume this single source.
+
+```
+item:        winter_coat
+name:        item.winter_coat.name
+desc:        item.winter_coat.desc
+scope:       profile
+kind:        outfit
+icon:        ui/icons/winter_coat.png
+
+item:        watering_can
+name:        item.watering_can.name
+desc:        item.watering_can.desc
+scope:       profile
+kind:        tool
+icon:        ui/icons/watering_can.png
+use_behavior: water_plant         # named in entity registry
+
+item:        seed
+name:        item.seed.name
+desc:        item.seed.desc
+scope:       maze
+kind:        consumable
+icon:        ui/icons/seed.png
+
+item:        nature_ticket
+name:        item.nature_ticket.name
+scope:       maze
+kind:        access
+icon:        ui/icons/ticket.png
+```
+
+`kind` is one of `outfit | tool | consumable | access`. The inventory UI groups items by kind; save tables key by `item_id`. Maze entity lines reference items by `item:` and never duplicate their metadata.
+
+### 4.3 Dialog definitions
+
+NPC dialogs live in `data/dialogs/<theme>.txt`, also data-driven:
+
+```
+dialog:      npc.shopkeeper.greet
+speaker:     npc.shopkeeper.name
+lines:
+  npc.shopkeeper.greet.l1
+  npc.shopkeeper.greet.l2
+repeat:      once_per_day
+post_state:  give_item:winter_coat   # optional
+
+dialog:      npc.beaver.idle
+speaker:                              # blank: no speaker name shown
+lines:
+  npc.beaver.idle.l1
+repeat:      always
+```
+
+`lines:` is an ordered list of localization keys; each key resolves to one line of text shown in sequence. `repeat:` is one of `once | once_per_day | always`. `post_state:` (optional) describes a state mutation when the dialog ends — granting an item, flipping an entity's `active` flag, advancing the clock. The dialog player consumes this list; the renderer animates the text reveal at the player's configured text speed (§2.15).
+
+### 4.4 Sprite asset manifest
+
+Each theme directory carries a `manifest.txt` declaring per-sprite metadata the engine needs. Without it, gameplay data would have to be derived from image dimensions:
 
 ```
 sprite:        tree_oak.png
 origin:        32, 96         # texture-space pixel of bottom-center anchor
 foot:          0, 0           # offset from origin to y-sort foot point
-collide:       rect 8 0 16 8  # collision rect relative to foot point
+collide:       rect 8 0 16 8  # default collision rect relative to foot point
 proximity:     rect -4 -4 24 20
 shadow_h:      1.4            # height scalar for shadow length
 layer:         object         # object | decor | character | hud
 interact:      0, -12         # anchor for interaction prompt UI
 ```
 
-A `RENDER_CONVENTIONS.md` in `assets/` pins iso angle (e.g., 30°), pixel-per-tile (64×32), shadow direction at noon, outfit-layer alignment grid. The manifest format is fed by Blender export scripts living in `art_src/`.
+**Per-instance overrides.** Defaults come from the sprite manifest. A maze entity line can override any shape field for that specific instance (e.g., a wider proximity for a fountain visible from a path):
+
+```
+fountain#village.fountain.market   24 18   sprite:fountain  proximity:rect:-8,-8,40,30
+```
+
+This lets a single sprite serve different gameplay roles across mazes without forcing a new sprite for each variation.
+
+### 4.5 Conventions document
+
+A `RENDER_CONVENTIONS.md` in `assets/` pins iso angle (e.g., 30°), pixel-per-tile (64×32), shadow direction at noon, outfit-layer alignment grid. The asset and item manifest formats are fed by Blender export scripts living in `art_src/`.
 
 ## 5. Tooling
 
@@ -512,13 +625,17 @@ A small CLI tool, `tools/validate.c`, compiled separately. Runs against `data/ma
 - Required headers (`name`, `theme`, `size`, `start`) exist and parse.
 - Map dimensions match `size`.
 - Start position is walkable.
-- Entity `stable_id`s are unique within the maze and globally unique across mazes (prevents save-write collisions).
+- Entity `stable_id`s are unique within the maze (required) and follow the maze-prefix convention from §3.6 (warning, escalates to error in CI).
 - Behavior names resolve against the registry.
-- Localization keys referenced in maze data exist in `en.lang`.
+- Item references in maze entity lines (`item:winter_coat`, `needs:winter_coat`) resolve against `data/items.txt`.
+- Dialog references in entity lines (`dialog:npc.shopkeeper.greet`) resolve against `data/dialogs/*.txt`.
+- Localization keys referenced in maze data, item definitions, and dialog definitions exist in `en.lang`.
 - Entity positions are inside the map.
 - Audio zones are well-formed rectangles inside the map.
 - Reachability: a simple graph walk over walkable tiles from the start position visits every required progression item.
-- Soft-lock check: for any progression that uses a `maze`-scope consumable, the validator verifies an additional reachable instance exists, **or** that the target rejects misuse.
+- Soft-lock **structural** risks: for any progression that uses a `maze`-scope consumable, the validator verifies that either an additional reachable instance exists, or the entity is annotated as rejecting misuse.
+
+**What the validator does not do.** It does not prove puzzle solvability across the full state space of inventory, gates, time-of-day, outfits, one-way state changes, and event callbacks. That is too expensive for a tile-graph walk and would over-constrain authoring. The validator catches structural mistakes (unreachable items, missing rejection annotations, ID collisions, broken localization keys); end-to-end solvability is verified by playthrough tests, not by static analysis.
 
 The validator runs as part of CI (when CI is added) and is invokable locally via a CMake target.
 
@@ -571,7 +688,7 @@ Before the full MVP, the project ships a **vertical slice** that proves every su
 Slice contents:
 
 - **One maze** — Nature (smallest practical map).
-- **One outfit gate** — the winter coat must be obtainable somewhere inside the slice or pre-granted for testing.
+- **One outfit gate** — use a **slice-only** outfit (`rain_boots`) found in the Nature slice that gates a small muddy patch inside the slice itself. The winter coat and ice maze remain final-progression content and are not exercised by the slice.
 - **One consumable item interaction** — a seed-on-plant or equivalent, with the §2.3 rejection rule enforced.
 - **One NPC dialog** — single-state, single-line.
 - **One audio base layer + one zone layer.**
@@ -588,12 +705,12 @@ The MVP ships when **all** of the following are demonstrably true:
 1. **Completable cold.** A new player can complete every maze without external instructions.
 2. **Resume correctness.** Closing and reopening the game resumes correctly from every maze, on every supported platform.
 3. **Reset safety.** Resetting a maze cannot remove profile-level unlocks or items earned in other mazes.
-4. **Soft-lock proof.** No required puzzle can be made impossible by item misuse. The validator passes for every shipped maze.
+4. **Soft-lock resistance.** The validator catches structural soft-lock risks (passes for every shipped maze), and every shipped maze has at least one human playthrough confirming completion under the soft-lock rules in §2.3.
 5. **Fully localized.** Every player-visible string routes through `t(...)`. A grep for raw English literals in `ui/` and dialog code returns nothing meaningful.
 6. **Accessibility minimum.** Remappable controls, three volume sliders, text speed setting, color-independent puzzle cues throughout.
 7. **Save robustness.** `PRAGMA integrity_check` runs on boot; corrupt DBs trigger a player-facing dialog and a timestamped backup before any overwrite.
 8. **Performance.** Steady 60fps on a 2018-era laptop at a 1080p window.
-9. **Quiet exit.** Closing the app at any point auto-saves cleanly; no `-wal`/`-shm` orphans persist.
+9. **Quiet exit.** Closing the app at any point commits all pending save data. On next launch, SQLite opens without recovery errors and the latest checkpoint is present. (Sidecar `-wal`/`-shm` files are normal SQLite behavior and are not a correctness measure; if explicit cleanup is desired, the close path can call `sqlite3_wal_checkpoint_v2(TRUNCATE)`.)
 
 ## 10. Out of scope (MVP)
 
@@ -655,22 +772,26 @@ Each question lists the decision needed and the default behavior if the question
 | **Behavior** | A named code path registered in `entity.c` that supplies an entity's event callbacks. |
 | **Blocker** | An entity or hazard that prevents movement until a condition is met. |
 | **Checkpoint** | A coherent moment at which the save system writes one transaction. Triggered by `save_checkpoint(reason)`. |
-| **Consumable** | An item with `count > 0` that is removed (or decremented) by being used. Always `maze`-scoped in MVP. |
+| **Consumable** | An `item_kind:consumable` item that is removed (or decremented) by use. Always `maze`-scoped in MVP. |
+| **Dialog** | A data-driven sequence of localized lines spoken by an NPC. Defined in `data/dialogs/<theme>.txt`. |
 | **Entity** | An object in the world with a position, optional collision/proximity shapes, and behavior callbacks. |
 | **Foot point** | The pixel offset on a sprite used for y-sort. Lives in the asset manifest. |
 | **Gate** | A condition (item required, time-of-day, outfit) that an entity uses to restrict interaction or visibility. |
 | **Hazard** | A region or tile type that has an effect on the player (slide, slow, block). Never harmful in the death sense. |
 | **Hint** | Localized text surfaced when an interaction is rejected or a blocker is examined. |
-| **Item** | A pickable thing. Has a `scope` of `profile` or `maze`. |
+| **Item** | A pickable thing. Has a `scope` (`profile` or `maze`) and a `kind` (`outfit`, `tool`, `consumable`, `access`). Defined in `data/items.txt`. |
+| **Item kind** | One of `outfit`, `tool`, `consumable`, `access`. Drives inventory grouping and use-eligibility. |
 | **Maze** | One scrolling world. Loaded as a unit. Has stable `maze_id` text. |
-| **Outfit** | A profile-scope item that changes the character's sprite and may unlock maze entry. |
+| **Outfit** | An `item_kind:outfit` profile-scope item that changes the character's sprite and may unlock maze entry. |
 | **Profile** | A named save slot. Up to four per install. |
 | **Proximity shape** | The shape used for "is the player near this entity for interaction." Distinct from collision shape. |
-| **Reset** | Player-initiated restart of the current maze. Preserves profile-scope state. |
-| **Slice** | The first-playable vertical slice (§8). |
+| **Reset** | Player-initiated restart of the current maze. Preserves profile-scope state. See §2.3 for the exact reset table. |
+| **Slice** | The first-playable vertical slice (§8). Slice-only content (e.g., `rain_boots`) is not part of final progression. |
 | **Soft-lock** | A state where the player cannot make progress and is forced to reset. Prevented by §2.3 rules. |
-| **Stable ID** | A designer-assigned text identifier on a maze entity. Persists across saves; survives entity reordering. |
-| **Tool** | A reusable item (e.g., watering can). `profile`-scoped if it unlocks later mazes, otherwise `maze`-scoped. |
+| **Stable ID** | A designer-assigned text identifier on a maze entity. Persists across saves; survives entity reordering. By convention prefixed with `maze_id.`. |
+| **Tick** | One fixed-step simulation step at 60 Hz (16.6 ms). Rendering may run at a higher rate. |
+| **Tool** | An `item_kind:tool` item (e.g., watering can). `profile`-scoped if it unlocks later mazes, otherwise `maze`-scoped. |
 | **Trigger** | A non-blocking region that fires `on_player_enter` / `on_player_exit`. |
+| **UI scale** | Native-resolution multiplier for HUD/menus, set in Settings. World layer always upscales from logical 480×270. |
 | **Unlock** | The state of a maze, item, or outfit becoming available. Persisted at profile scope. |
 | **Zone** | A rectangular region in a maze that activates a texture audio layer when entered. |
