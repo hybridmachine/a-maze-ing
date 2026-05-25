@@ -1,0 +1,29 @@
+# Build output
+build/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.lib
+
+# Brainstorm session content (mockups are local; sessions are ephemeral)
+.superpowers/
+
+# Save files generated during development
+saves/
+*.db
+*.db-wal
+*.db-shm
+
+# Art source files (not shipped with the game)
+art_src/*.blend1
+art_src/*.blend2
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# macOS bundle output
+*.app/Contents/_CodeSignature/
