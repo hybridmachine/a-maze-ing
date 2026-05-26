@@ -18,9 +18,27 @@
 #define TICK_DT (1.0 / TICK_HZ)
 #define MAX_CATCHUP_TICKS 5
 
-static void load_slice_into_game(Game *g) {
-    if (!g->world.maze.tiles &&
-        world_load_maze(&g->world, "data/mazes/nature.maze", "assets/themes/nature")) {
+static bool content_path(const char *relative_path, char *out, size_t out_size) {
+    if (util_paths_content_path(relative_path, out, out_size)) {
+        return true;
+    }
+    LOGE("could not resolve content path: %s", relative_path);
+    return false;
+}
+
+static bool load_slice_into_game(Game *g) {
+    if (g->world.maze.tiles) {
+        return true;
+    }
+
+    char maze_path[1024];
+    char theme_dir[1024];
+    if (!content_path("data/mazes/nature.maze", maze_path, sizeof maze_path) ||
+        !content_path("assets/themes/nature", theme_dir, sizeof theme_dir)) {
+        return false;
+    }
+
+    if (world_load_maze(&g->world, maze_path, theme_dir)) {
         MazeSnapshot snap;
         if (g->active_profile_id > 0 &&
             save_load_maze_snapshot(g->active_profile_id, "nature", &snap)) {
@@ -38,7 +56,10 @@ static void load_slice_into_game(Game *g) {
             snprintf(g->player.outfit, sizeof g->player.outfit, "%s", outfit);
         }
         camera_init(&g->camera, g->player.pos);
+        return true;
     }
+    LOGE("could not load maze: %s", maze_path);
+    return false;
 }
 
 int main(void) {
@@ -67,12 +88,28 @@ int main(void) {
         return 1;
     }
 
-    asset_init("assets");
+    char assets_root[1024];
+    char strings_dir[1024];
+    char items_path[1024];
+    char dialogs_path[1024];
+    if (!content_path("assets", assets_root, sizeof assets_root)) {
+        snprintf(assets_root, sizeof assets_root, "assets");
+    }
+    asset_init(assets_root);
     audio_init();
     ui_init();
-    loc_load_language(loc_detect_os_lang());
-    items_load("data/items.txt");
-    dialogs_load("data/dialogs/nature.txt");
+    if (content_path("data/strings", strings_dir, sizeof strings_dir) &&
+        !loc_load_language_from(strings_dir, loc_detect_os_lang())) {
+        LOGE("could not load localization: %s", strings_dir);
+    }
+    if (content_path("data/items.txt", items_path, sizeof items_path) &&
+        !items_load(items_path)) {
+        LOGE("could not load items: %s", items_path);
+    }
+    if (content_path("data/dialogs/nature.txt", dialogs_path, sizeof dialogs_path) &&
+        !dialogs_load(dialogs_path)) {
+        LOGE("could not load dialogs: %s", dialogs_path);
+    }
     input_init();
 
     Game *g = game_create();
@@ -85,8 +122,9 @@ int main(void) {
     double last = GetTime();
     while (!WindowShouldClose() && !g->quit_requested) {
         if (g->state == GS_MAZE_SELECT && IsKeyPressed(KEY_ENTER)) {
-            load_slice_into_game(g);
-            game_set_state(g, GS_IN_MAZE);
+            if (load_slice_into_game(g)) {
+                game_set_state(g, GS_IN_MAZE);
+            }
         }
         double now = GetTime();
         accum += now - last;
