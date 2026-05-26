@@ -1,0 +1,11 @@
+sprite:        grass.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor
+
+sprite:        dirt.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor

@@ -1,0 +1,1 @@
+int ui_hud_translation_unit;

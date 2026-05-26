@@ -1,0 +1,19 @@
+name:       maze.test.name
+theme:      nature
+size:       8x4
+start:      1,1
+time_start: 08:00
+ambient:    birds_loop.ogg, wind_soft.ogg
+
+tiles:
+........
+.GGGGGG.
+.G....G.
+........
+
+entities:
+pickup#test.seed.a            2 2   item:seed
+door#test.gate.b              5 2   needs:rain_boots target:area_b proximity:rect:-10,-10,20,20
+
+audio_zones:
+creek 1 1 3 2 texture:water_creek.ogg

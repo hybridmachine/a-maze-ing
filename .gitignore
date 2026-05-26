@@ -25,5 +25,8 @@ art_src/*.blend2
 *.swp
 .DS_Store
 
+# Third-party source tree generated checks
+third_party/sqlite/.main.mk.checks
+
 # macOS bundle output
 *.app/Contents/_CodeSignature/

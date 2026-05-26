@@ -1,0 +1,1 @@
+int ui_inventory_translation_unit;

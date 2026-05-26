@@ -1,0 +1,4 @@
+. 1 sprite:dirt.png
+g 0 sprite:grass.png
+m 1 sprite:mud.png
+w 0 sprite:water.png

@@ -1,0 +1,21 @@
+item:        rain_boots
+name:        item.rain_boots.name
+desc:        item.rain_boots.desc
+scope:       profile
+kind:        outfit
+icon:        ui/icons/rain_boots.png
+
+item:        seed
+name:        item.seed.name
+desc:        item.seed.desc
+scope:       maze
+kind:        consumable
+icon:        ui/icons/seed.png
+use_tag:     water_plant
+
+item:        watering_can
+name:        item.watering_can.name
+scope:       profile
+kind:        tool
+icon:        ui/icons/watering_can.png
+use_tag:     water_plant

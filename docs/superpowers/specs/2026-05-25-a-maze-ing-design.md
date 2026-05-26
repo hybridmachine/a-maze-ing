@@ -59,7 +59,7 @@ Reset preserves outfits and items at profile scope (see §2.7) — resetting the
 | `maze_inventory` for this maze | Cleared |
 | `entity_overrides` for this maze | Cleared |
 | `maze_snapshot` for this maze | Deleted (player respawns at the maze's `start` position) |
-| Clock | Reset to the maze's `time_start` value |
+| Clock | Reset to the maze's `time_start` value with `day_index = 0` |
 | NPC dialog state and `repeat` counters | Reset to initial |
 | Time-gated entity state | Recomputed from clock and current time gates |
 | Player's currently-worn outfit | Preserved (profile-level) |
@@ -98,6 +98,8 @@ When the player presses the action key:
 
 Failed uses do **not** consume the item (rule 3 in §2.3). Repeated failed interactions on the same target may escalate the hint text (`hint.2`, `hint.3` keys).
 
+**Item-use ownership.** The target entity owns applicability and world mutation. Item definitions provide metadata and optional semantic `use_tag`s; they do not independently mutate the world. A door decides whether `item:brass_key` applies to it, a withered plant decides whether an item tagged `water_plant` applies, and the target's `on_interact` callback performs the accepted effect. Shared helpers may live in the behavior registry, but the target always opts in.
+
 A separate inventory key opens the full inventory screen for browsing.
 
 ### 2.6 Maze structure and relationships
@@ -108,12 +110,12 @@ Each maze is one scrolling world bigger than the screen. The camera follows the 
 
 ### 2.7 Item scope
 
-Items have one of two scopes, declared in the entity definition:
+Items have one of two scopes, declared in the canonical item definition file (`data/items.txt`, see §4.2):
 
 - **`profile`** — outfits, permanent tools, maze-access items. Persist across all mazes for the active profile. Picked up once.
 - **`maze`** — keys, tickets, seeds, lanterns, single-maze consumables. Cleared on maze reset; do not transfer to other mazes.
 
-The save schema reflects this split (`outfits_owned` and a future `profile_items` are profile-scoped; `inventory` rows for maze-scoped items are keyed by maze).
+Maze entity lines reference items by `item:<id>` only; they do not duplicate scope, kind, display text, or icon metadata. The save schema reflects this split: `profile_items` owns profile-scope items, `maze_inventory` owns maze-scope items keyed by maze, and `outfit_worn` stores the profile's currently worn outfit.
 
 ### 2.8 Scope — 4–6 mazes
 
@@ -129,7 +131,7 @@ Themes for MVP:
 
 ### 2.9 Time of day
 
-A single `Clock` advances at ~1 game-hour per 3 real-minutes (~70 minutes of play per full day-night cycle). The clock pauses during dialogs, the Pause Menu, and the Inventory screen.
+A single `Clock` advances at ~1 game-hour per 3 real-minutes (~70 minutes of play per full day-night cycle). It stores both `clock_min` (minute within the current day) and `day_index` (increments at midnight). The clock pauses during dialogs, the Pause Menu, and the Inventory screen.
 
 Time gates follow two rules to avoid waiting puzzles:
 
@@ -241,9 +243,16 @@ Flat C modules, one `.c/.h` pair per subsystem. All state is passed explicitly v
 
 **Simulation runs at a fixed 60 Hz tick** (16.6 ms). Rendering runs at the display's refresh rate. The main loop uses a fixed-step accumulator: each frame, it adds elapsed wall time to an accumulator and runs as many 60 Hz ticks as fit (clamped to at most 5 ticks per frame to avoid spirals after long pauses). Fixed-step makes player movement, hazards, time gates, and entity callbacks reproducible — invaluable for tests and replay-style debugging.
 
+Before running accumulator ticks for a rendered frame, `input` samples raw keyboard state once and produces:
+
+- A held-action snapshot for continuous actions such as movement.
+- A counted edge-action queue for presses such as interact, inventory, confirm, and pause.
+
+Ticks consume from that buffered action state. This prevents `IsKeyPressed`-style edges from being missed on frames with zero ticks or applied repeatedly on frames with multiple catch-up ticks.
+
 Tick order (one tick):
 
-1. **Poll input** — gather actions, never raw key codes, from `input`.
+1. **Consume buffered input** — read semantic actions, never raw key codes, from `input`.
 2. **Update UI or gameplay state** — pause/resume/menu transitions resolve before world simulation.
 3. **Resolve player movement** — apply velocity, slide against blocking shapes, snap-out of overlaps.
 4. **Apply hazards/triggers** — hazard regions act on the player's new position; triggers fire `on_player_enter`/`on_player_exit`.
@@ -300,7 +309,7 @@ typedef struct Entity {
     int8_t     gate_hour_b;
     EntityCallbacks *cb;         // points into registry; never freed
     union {
-        struct { ItemId item_id; ItemScope scope; bool taken; }   item;
+        struct { ItemId item_id; ItemScope scope; bool taken; }   item;     // scope copied from data/items.txt
         struct { int    type;    int  param;  }                   hazard;
         struct { int    target;  bool active; }                   interact;
         struct { int    dialog_id; int  state; }                  npc;
@@ -332,14 +341,14 @@ GG..WWW......TTT....
 ...
 
 entities:
-seed#nature.seed.west_glade        12 8   pickup item:seed         scope:maze
+seed#nature.seed.west_glade        12 8   pickup item:seed
 sundial#nature.sundial.main        20 15  gate:12-13
 shopkeeper#nature.npc.shopkeeper   30 22  gate:06-22 dialog:npc.shopkeeper.greet
 ice_patch#nature.hazard.pond_a     40 30  hazard:ice
 locked_gate#nature.gate.ice_path   50 18  needs:winter_coat target:area_b
 beaver#nature.npc.beaver_a         28 19  npc patrol:28,19-32,19
 fireflies#nature.decor.glade       18 12  gate:19-23
-winter_coat#nature.item.coat       16 30  pickup item:winter_coat  scope:profile
+winter_coat#nature.item.coat       16 30  pickup item:winter_coat
 
 audio_zones:
 creek        12-18 30-36  texture:water_creek.ogg
@@ -479,7 +488,7 @@ CREATE TABLE maze_snapshot (
   player_y     REAL NOT NULL,
   facing       INTEGER NOT NULL,
   clock_min    INTEGER NOT NULL,
-  outfit_worn  TEXT NOT NULL,
+  day_index    INTEGER NOT NULL,
   PRIMARY KEY (profile_id, maze_id),
   FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 );
@@ -491,6 +500,7 @@ CREATE TABLE entity_overrides (
   stable_id   TEXT NOT NULL,
   taken       INTEGER NOT NULL DEFAULT 0,
   active      INTEGER NOT NULL DEFAULT 0,
+  last_dialog_day INTEGER NOT NULL DEFAULT -1,
   state_blob  BLOB,              -- escape hatch for kind-specific extras
   PRIMARY KEY (profile_id, maze_id, stable_id),
   FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE CASCADE
@@ -549,7 +559,7 @@ desc:        item.watering_can.desc
 scope:       profile
 kind:        tool
 icon:        ui/icons/watering_can.png
-use_behavior: water_plant         # named in entity registry
+use_tag:     water_plant          # semantic tag; targets opt in
 
 item:        seed
 name:        item.seed.name
@@ -565,7 +575,7 @@ kind:        access
 icon:        ui/icons/ticket.png
 ```
 
-`kind` is one of `outfit | tool | consumable | access`. The inventory UI groups items by kind; save tables key by `item_id`. Maze entity lines reference items by `item:` and never duplicate their metadata.
+`kind` is one of `outfit | tool | consumable | access`. The optional `use_tag` is a semantic hint used by target entities when deciding whether an item applies; it does not run code on its own. The inventory UI groups items by kind; save tables key by `item_id`. Maze entity lines reference items by `item:` and never duplicate their metadata.
 
 ### 4.3 Dialog definitions
 
@@ -587,7 +597,7 @@ lines:
 repeat:      always
 ```
 
-`lines:` is an ordered list of localization keys; each key resolves to one line of text shown in sequence. `repeat:` is one of `once | once_per_day | always`. `post_state:` (optional) describes a state mutation when the dialog ends — granting an item, flipping an entity's `active` flag, advancing the clock. The dialog player consumes this list; the renderer animates the text reveal at the player's configured text speed (§2.15).
+`lines:` is an ordered list of localization keys; each key resolves to one line of text shown in sequence. `repeat:` is one of `once | once_per_day | always`. `once_per_day` compares the entity override's `last_dialog_day` with the current clock `day_index`; maze reset clears this state along with other entity overrides. `post_state:` (optional) describes a state mutation when the dialog ends — granting an item, flipping an entity's `active` flag, advancing the clock. The dialog player consumes this list; the renderer animates the text reveal at the player's configured text speed (§2.15).
 
 ### 4.4 Sprite asset manifest
 
@@ -673,9 +683,11 @@ All tests run without a GL context wherever possible, preserving the raylib quar
   - **Save migrations** — run each migration script against a snapshot of the prior schema, verify result.
   - `collision` shape queries.
   - `shadow` math.
-  - `time_of_day` gating, including hour-band edge cases (gate spanning midnight).
+  - `time_of_day` gating, including hour-band edge cases (gate spanning midnight), day rollover, and `day_index` persistence.
   - `localization` lookup, fallback chain, malformed `.lang` file parsing.
   - `interaction` target selection — facing, ties, multi-item eligibility.
+  - `input` remapping and buffered edge actions — missing required bindings, reserved-key recovery, zero-tick frames, and multi-tick catch-up frames.
+  - `dialog` repeat rules — `once`, `once_per_day`, `always`, and `last_dialog_day` save/load behavior.
   - **Entity behavior tests** with a fake `Game` state — verify `on_player_enter`/`on_interact` against scripted scenarios.
   - **Maze validator** — verify each rule catches its intended bug class.
 - **Headless smoke test.** Boots, loads each maze file, and steps the simulation N frames without rendering. Catches data-driven regressions.

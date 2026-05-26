@@ -1,0 +1,15 @@
+sprite:        tree_oak.png
+origin:        32, 96
+foot:          0, 0
+collide:       rect 8 0 16 8
+proximity:     rect -4 -4 24 20
+shadow_h:      1.4
+layer:         object
+interact:      0, -12
+
+sprite:        fountain.png
+origin:        32, 64
+collide:       rect 0 -4 32 12
+proximity:     rect -8 -8 40 30
+shadow_h:      0.6
+layer:         object

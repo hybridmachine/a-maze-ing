@@ -1,0 +1,98 @@
+sprite:        grass.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor
+
+sprite:        dirt.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor
+
+sprite:        tree_oak.png
+origin:        32, 96
+foot:          0, 0
+collide:       rect -6 -4 12 8
+proximity:     rect -10 -8 20 16
+shadow_h:      1.4
+layer:         object
+
+sprite:        seed_pickup.png
+origin:        16, 24
+foot:          0, 0
+proximity:     rect -8 -8 16 16
+shadow_h:      0.4
+layer:         object
+interact:      0, -16
+
+sprite:        withered_plant.png
+origin:        16, 24
+foot:          0, 0
+collide:       rect -4 -2 8 4
+proximity:     rect -10 -10 20 16
+shadow_h:      0.6
+layer:         object
+interact:      0, -16
+
+sprite:        flower.png
+origin:        16, 24
+foot:          0, 0
+proximity:     rect -10 -10 20 16
+shadow_h:      0.6
+layer:         object
+interact:      0, -16
+
+sprite:        rain_boots_pickup.png
+origin:        16, 16
+foot:          0, 0
+proximity:     rect -10 -10 20 16
+shadow_h:      0.3
+layer:         object
+
+sprite:        locked_gate.png
+origin:        32, 64
+foot:          0, 0
+collide:       rect -16 -4 32 8
+proximity:     rect -20 -10 40 20
+shadow_h:      1.0
+layer:         object
+
+sprite:        sign.png
+origin:        16, 32
+foot:          0, 0
+collide:       rect -4 -2 8 4
+proximity:     rect -10 -10 20 20
+shadow_h:      0.6
+layer:         object
+interact:      0, -16
+
+sprite:        sundial.png
+origin:        24, 32
+foot:          0, 0
+collide:       rect -8 -2 16 6
+proximity:     rect -16 -10 32 20
+shadow_h:      0.8
+layer:         object
+interact:      0, -12
+
+sprite:        npc_gardener.png
+origin:        16, 48
+foot:          0, 0
+collide:       rect -4 -4 8 8
+proximity:     rect -14 -14 28 22
+shadow_h:      1.2
+layer:         character
+interact:      0, -36
+
+sprite:        water.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor
+
+sprite:        mud.png
+origin:        32, 16
+foot:          0, 0
+shadow_h:      0.0
+layer:         decor

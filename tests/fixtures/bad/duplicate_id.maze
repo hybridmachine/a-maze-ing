@@ -1,0 +1,15 @@
+name:       maze.bad.name
+theme:      nature
+size:       4x4
+start:      1,1
+time_start: 08:00
+
+tiles:
+....
+....
+....
+....
+
+entities:
+pickup#duplicate_id.seed 1 1 item:seed
+pickup#duplicate_id.seed 2 1 item:seed

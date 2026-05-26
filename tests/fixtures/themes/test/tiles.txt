@@ -1,0 +1,5 @@
+. 1 sprite:dirt.png
+G 0 sprite:grass.png
+T 0 sprite:tree_oak.png
+W 0 sprite:water.png
+S 1 sprite:sand.png

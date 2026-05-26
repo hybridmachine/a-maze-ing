@@ -1,0 +1,6 @@
+this line has no equals
+ok.key = ok value
+   # leading whitespace comment
+=value_only
+key_only=
+key.trim   =   trimmed value

@@ -1,0 +1,13 @@
+dialog:      npc.beaver.idle
+speaker:
+lines:
+  npc.beaver.idle.l1
+  npc.beaver.idle.l2
+repeat:      once_per_day
+
+dialog:      npc.gardener.greet
+speaker:     npc.gardener.name
+lines:
+  npc.gardener.greet.l1
+repeat:      once
+post_state:  give_item:rain_boots

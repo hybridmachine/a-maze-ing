@@ -1,0 +1,5 @@
+# slice strings
+ui.title.start = Start
+ui.title.quit  = Quit
+maze.nature.name = Nature
+item.seed.name   = Seed

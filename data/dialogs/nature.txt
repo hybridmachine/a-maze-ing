@@ -1,0 +1,7 @@
+dialog:      npc.nature.gardener.greet
+speaker:     npc.nature.gardener.name
+lines:
+  npc.nature.gardener.greet.l1
+  npc.nature.gardener.greet.l2
+repeat:      once
+post_state:  give_item:rain_boots
