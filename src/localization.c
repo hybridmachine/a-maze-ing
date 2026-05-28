@@ -1,6 +1,7 @@
 #include "localization.h"
 
 #include "util_log.h"
+#include "util_paths.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -119,7 +120,11 @@ bool loc_load_language_from(const char *strings_dir, const char *lang_code) {
 }
 
 bool loc_load_language(const char *lang_code) {
-    return loc_load_language_from("data/strings", lang_code);
+    char strings_dir[1024];
+    if (!util_paths_content_path("data/strings", strings_dir, sizeof strings_dir)) {
+        return false;
+    }
+    return loc_load_language_from(strings_dir, lang_code);
 }
 
 void loc_shutdown(void) {

@@ -100,7 +100,19 @@ target_include_directories(amazeing PRIVATE src)
 target_link_libraries(amazeing PRIVATE raylib sqlite3 m)
 amazeing_strict(amazeing)
 if(APPLE)
-    set_target_properties(amazeing PROPERTIES MACOSX_BUNDLE TRUE)
+    set_target_properties(amazeing PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "A Maze Ing"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.btabone.amazeing"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+        MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0")
+    add_custom_command(TARGET amazeing POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:amazeing>/Resources/assets"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:amazeing>/Resources/data"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_CONTENT_DIR:amazeing>/Resources"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_BUNDLE_CONTENT_DIR:amazeing>/Resources/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data" "$<TARGET_BUNDLE_CONTENT_DIR:amazeing>/Resources/data"
+        VERBATIM)
 endif()
 
 enable_testing()
@@ -108,6 +120,7 @@ add_executable(test_runner
     third_party/test_harness/test_harness.c
     tests/test_main.c
     tests/test_util_math.c
+    tests/test_util_paths.c
     tests/test_localization.c
     tests/test_items.c
     tests/test_dialogs.c

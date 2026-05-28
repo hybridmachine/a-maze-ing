@@ -1,6 +1,7 @@
 #include "test_harness.h"
 
 void register_util_math_tests(void);
+void register_util_paths_tests(void);
 void register_localization_tests(void);
 void register_items_tests(void);
 void register_dialogs_tests(void);
@@ -23,6 +24,8 @@ void register_game_fixture_tests(void);
 int main(void) {
     printf("util_math\n");
     register_util_math_tests();
+    printf("util_paths\n");
+    register_util_paths_tests();
     printf("localization\n");
     register_localization_tests();
     printf("items\n");
