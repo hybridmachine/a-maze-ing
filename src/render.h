@@ -4,7 +4,7 @@ struct Game;
 
 #define WORLD_RT_W 480
 #define WORLD_RT_H 270
-#define TILE_W 64
+#define TILE_W 32
 #define TILE_H 32
 
 void render_init(void);
