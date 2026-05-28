@@ -25,11 +25,11 @@ entities:
 sign#nature.sign.intro        2 1   sprite:sign.png sign:hint.welcome
 npc#nature.npc.gardener       4 1   sprite:npc_gardener.png dialog:npc.nature.gardener.greet
 pickup#nature.seed.a          12 1  sprite:seed_pickup.png item:seed
-withered_plant#nature.wp.a    17 1  sprite:withered_plant.png use_tag:water_plant proximity:rect:-18,-12,36,24
+withered_plant#nature.wp.a    17 1  sprite:withered_plant.png use_tag:water_plant proximity:rect:-9,-6,18,12
 sundial#nature.sundial.main   21 3  sprite:sundial.png gate:12-13
 pickup#nature.rb.a            3 11  sprite:rain_boots_pickup.png item:rain_boots
-hazard#nature.mud.patch       18 11 sprite:mud.png hazard:mud needs:rain_boots hint:hint.mud.needs_boots collide:rect:-64,-16,128,32
-door#nature.gate.muddy        20 11 sprite:locked_gate.png needs:rain_boots target:area_b collide:rect:-28,-12,56,24
+hazard#nature.mud.patch       18 11 sprite:mud.png hazard:mud needs:rain_boots hint:hint.mud.needs_boots collide:rect:-32,-8,64,16
+door#nature.gate.muddy        20 11 sprite:locked_gate.png needs:rain_boots target:area_b collide:rect:-14,-6,28,12
 
 audio_zones:
 creek 11 3 14 5 texture:water_creek.ogg

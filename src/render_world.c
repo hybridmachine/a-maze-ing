@@ -9,8 +9,8 @@
 #include <stdlib.h>
 
 static void iso_world_to_screen(float tx, float ty, float *sx, float *sy) {
-    *sx = (tx - ty) * (float)(TILE_W / 2);
-    *sy = (tx + ty) * (float)(TILE_H / 2);
+    *sx = tx * TILE_W;
+    *sy = ty * TILE_H;
 }
 
 static Color color_for_tile(char c) {
@@ -37,16 +37,8 @@ static void draw_iso_tile(float tx, float ty, Color c) {
     iso_world_to_screen(tx, ty, &sx, &sy);
     sx += WORLD_RT_W * 0.5f;
     sy += WORLD_RT_H * 0.5f;
-    Vector2 pts[4] = {{sx, sy - TILE_H * 0.5f},
-                      {sx + TILE_W * 0.5f, sy},
-                      {sx, sy + TILE_H * 0.5f},
-                      {sx - TILE_W * 0.5f, sy}};
-    DrawTriangle(pts[0], pts[1], pts[2], c);
-    DrawTriangle(pts[0], pts[2], pts[3], c);
-    DrawLineV(pts[0], pts[1], Fade(BLACK, 0.15f));
-    DrawLineV(pts[1], pts[2], Fade(BLACK, 0.15f));
-    DrawLineV(pts[2], pts[3], Fade(BLACK, 0.15f));
-    DrawLineV(pts[3], pts[0], Fade(BLACK, 0.15f));
+    DrawRectangle((int)(sx - TILE_W * 0.5f), (int)(sy - TILE_H * 0.5f), TILE_W, TILE_H, c);
+    DrawRectangleLines((int)(sx - TILE_W * 0.5f), (int)(sy - TILE_H * 0.5f), TILE_W, TILE_H, Fade(BLACK, 0.15f));
 }
 
 static void draw_tile(Game *g, int x, int y, char c) {
@@ -104,7 +96,7 @@ static void draw_theme_sprite(Game *g, const SpriteDef *sd, Vec2 pos) {
         return;
     }
     asset_release(key);
-    DrawCircle((int)sx, (int)(sy - 12), 6, SKYBLUE);
+    DrawCircle((int)sx, (int)sy, 6, SKYBLUE);
 }
 
 static void draw_player_sprite(Game *g) {
@@ -118,20 +110,20 @@ static void draw_player_sprite(Game *g) {
     snprintf(outfit_key, sizeof outfit_key, "character/outfits/%s.png", g->player.outfit);
     Texture2D *outfit = asset_acquire_texture(outfit_key);
     if (outfit && outfit->id) {
-        DrawTexture(*outfit, (int)(sx - 16), (int)(sy - 48), WHITE);
+        DrawTexture(*outfit, (int)(sx - 16), (int)(sy - 16), WHITE);
         asset_release(outfit_key);
 
         char face_key[160];
         snprintf(face_key, sizeof face_key, "character/faces/%s.png", g->player.face);
         Texture2D *face = asset_acquire_texture(face_key);
         if (face && face->id) {
-            DrawTexture(*face, (int)(sx - 8), (int)(sy - 44), WHITE);
+            DrawTexture(*face, (int)(sx - 16), (int)(sy - 16), WHITE);
         }
         asset_release(face_key);
         return;
     }
     asset_release(outfit_key);
-    DrawCircle((int)sx, (int)(sy - 14), 7, RAYWHITE);
+    DrawCircle((int)sx, (int)sy, 7, RAYWHITE);
 }
 
 void render_world(Game *g, float alpha) {
@@ -175,7 +167,7 @@ void render_world(Game *g, float alpha) {
             float sx, sy;
             iso_world_to_screen(e->pos.x - g->camera.pos.x, e->pos.y - g->camera.pos.y, &sx,
                                 &sy);
-            DrawCircle((int)(sx + WORLD_RT_W * 0.5f), (int)(sy + WORLD_RT_H * 0.5f - 12), 6,
+            DrawCircle((int)(sx + WORLD_RT_W * 0.5f), (int)(sy + WORLD_RT_H * 0.5f), 6,
                        e->kind == ENT_NPC ? GOLD : SKYBLUE);
         }
     }

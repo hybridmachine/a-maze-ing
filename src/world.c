@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ASSET_SHAPE_PX_PER_WORLD_X 64.0f
+#define ASSET_SHAPE_PX_PER_WORLD_X 32.0f
 #define ASSET_SHAPE_PX_PER_WORLD_Y 32.0f
 
 static char *trim_world(char *s) {
